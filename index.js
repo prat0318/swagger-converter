@@ -110,7 +110,8 @@ function convert(resourceListing, apiDeclarations) {
 function buildInfo(source) {
   var info = {
     version: source.apiVersion,
-    title: 'Title was not specified'
+    title: 'Title was not specified',
+    version: '1.0.0'
   };
 
   if (typeof source.info === 'object') {
