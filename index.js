@@ -325,16 +325,23 @@ function buildParameter(oldParameter) {
   if (primitiveTypes.indexOf(oldParameter.type) === -1) {
     parameter.schema = {$ref: '#/definitions/' + oldParameter.type};
   } else {
-    parameter.type = oldParameter.type.toLowerCase();
+      if (oldParameter.paramType == 'body') {
+        parameter.schema = {};
+        obj = parameter.schema;
+      } else {
+        obj = parameter;
+      }
+
+    obj.type = oldParameter.type.toLowerCase();
 
     copyProperties.forEach(function(name) {
       if (typeof oldParameter[name] !== 'undefined') {
-        parameter[name] = oldParameter[name];
+        obj[name] = oldParameter[name];
       }
     });
 
     if (typeof oldParameter.defaultValue !== 'undefined') {
-      parameter.default = oldParameter.defaultValue;
+      obj.default = oldParameter.defaultValue;
     }
   }
 
