@@ -95,6 +95,7 @@ function convert(resourceListing, apiDeclarations) {
     }
   });
 
+  result.definitions = {};
   if (Object.keys(models).length) {
     result.definitions = transformAllModels(models);
   }
