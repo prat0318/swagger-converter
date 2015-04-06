@@ -277,6 +277,50 @@ function buildOperation(oldOperation, produces, consumes) {
     };
   }
 
+  var primitiveTypes = [
+    'string',
+    'number',
+    'boolean',
+    'integer',
+    'array',
+    'void',
+    'File'
+  ];
+  var copyProperties = [
+    'format',
+    'default',
+    'maximum',
+    'minimum',
+    'items'
+  ];
+
+  if(oldOperation.type != 'void'){
+      if(!('200' in operation.responses)) {
+          operation.responses['200'] = {
+              description: 'No response was specified'
+          }
+      }
+
+      success_obj = operation.responses['200']
+      if (primitiveTypes.indexOf(oldOperation.type) === -1) {
+        success_obj.schema = {$ref: '#/definitions/' + oldOperation.type};
+      } else {
+        success_obj.schema = {};
+        success_obj.schema.type = oldOperation.type.toLowerCase();
+
+        copyProperties.forEach(function(name) {
+          if (typeof oldOperation[name] !== 'undefined') {
+            success_obj.schema[name] = oldOperation[name];
+          }
+        });
+
+        if(oldOperation.items && '$ref' in oldOperation.items) {
+            success_obj.schema.items['$ref'] = '#/definitions/' +
+                oldOperation.items['$ref'];
+        }
+      }
+  }
+
   return operation;
 }
 
@@ -316,6 +360,7 @@ function buildParameter(oldParameter) {
     'File'
   ];
   var copyProperties = [
+    'format',
     'default',
     'maximum',
     'minimum',
