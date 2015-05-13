@@ -33,6 +33,30 @@ if (typeof window === 'undefined') {
   };
 }
 
+/* Find if Tag is not present in a list of tag objects
+ * @param tags {array} - array of tag objects
+ * @param query - string of tag name
+ * @returns {boolean} - True or False
+ */
+function isTagNotPresent(tags, query) {
+  tags.forEach(function(tagObject) {
+    if(tagObject.name === query)
+      return true;
+  });
+  return false;
+}
+
+/* Add operation Tags to global list if not already present
+ * @param result {object} - parent swagger object
+ * @param tags {array} - tags of an operation
+ */
+function addPathTagsToGlobalTagsList(result, tags) {
+  tags.forEach(function(tag) {
+    if(isTagNotPresent(result.tags, tag))
+      result.tags.push({'name': tag, 'description': ''});
+  });
+}
+
 /*
  * Converts Swagger 1.2 specs file to Swagger 2.0 specs.
  * @param resourceListing {object} - root Swagger 1.2 document where it has a
@@ -54,6 +78,7 @@ function convert(resourceListing, apiDeclarations) {
   var result = {
     swagger: '2.0',
     info: buildInfo(resourceListing),
+    tags: [],
     paths: {}
   };
 
@@ -71,6 +96,9 @@ function convert(resourceListing, apiDeclarations) {
   // Handle embedded documents
   if (Array.isArray(resourceListing.apis)) {
     resourceListing.apis.forEach(function(api) {
+      tag = api.path.replace(/^\//,"");
+      result.tags.push({'name': tag, 'description': api.description || ''});
+
       if (Array.isArray(api.operations)) {
         result.paths[api.path] = buildPath(api, resourceListing);
       }
@@ -87,7 +115,10 @@ function convert(resourceListing, apiDeclarations) {
 
     if (!Array.isArray(apiDeclaration.apis)) { return; }
     apiDeclaration.apis.forEach(function(api) {
-      result.paths[api.path] = buildPath(api, apiDeclaration);
+      path = buildPath(api, apiDeclaration);
+      for(var method in path)
+        addPathTagsToGlobalTagsList(result, path[method].tags);
+      result.paths[api.path] = path;
 
     });
     if (apiDeclaration.models && Object.keys(apiDeclaration.models).length) {
@@ -221,11 +252,15 @@ function processDataType(field) {
 */
 function buildPath(api, apiDeclaration) {
   var path = {};
+  var tags = [];
+
+  if(apiDeclaration.resourcePath)
+    tags.push(apiDeclaration.resourcePath.replace(/^\//,""));
 
   api.operations.forEach(function(oldOperation) {
     var method = oldOperation.method.toLowerCase();
     path[method] = buildOperation(oldOperation, apiDeclaration.produces,
-      apiDeclaration.consumes);
+      apiDeclaration.consumes, tags);
   });
 
   return path;
@@ -236,13 +271,16 @@ function buildPath(api, apiDeclaration) {
  * @param oldOperation {object} - Swagger 1.2 operation object
  * @param produces {array} - from containing apiDeclaration
  * @param consumes {array} - from containing apiDeclaration
+ * @param tags {array} - contains resourcePath of the parent api
  * @returns {object} - Swagger 2.0 operation object
 */
-function buildOperation(oldOperation, produces, consumes) {
+function buildOperation(oldOperation, produces, consumes, tags) {
   var operation = {
     responses: {},
     description: oldOperation.description || ''
   };
+
+  operation.tags = tags;
 
   if (oldOperation.summary) {
     operation.summary = oldOperation.summary;
