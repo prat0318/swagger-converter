@@ -10,6 +10,7 @@
 var convert = require('swagger-converter');
 var path = require('path');
 var fs = require('fs');
+var validator = require('./validate.js');
 
 var args = process.argv.slice(2);
 
@@ -36,9 +37,16 @@ if (Array.isArray(resourceListing.apis)) {
   });
 }
 
+console.log('\nValidating Input Swagger 1.2 spec...');
+validator.validateInputSwagger(resourceListing, apiDeclarations);
+
 var swagger2Document = convert(resourceListing, apiDeclarations);
+
+console.log('\nValidating Output Swagger 2.0 spec...');
+validator.validateOutputSwagger(swagger2Document);
+
 var swagger2 = JSON.stringify(swagger2Document, null, 2);
 var outputPath = getFilePath(listingFilePath, "swagger");
 
 fs.writeFile(outputPath, swagger2);
-console.log("Output has been stored at: " + outputPath);
+console.log("\nSuccessful. Output has been stored at: " + outputPath);
