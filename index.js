@@ -290,8 +290,13 @@ function buildOperation(oldOperation, produces, consumes, tags) {
     operation.operationId = oldOperation.nickname;
   }
 
-  if (produces) { operation.produces = produces; }
-  if (consumes) { operation.consumes = consumes; }
+  if (oldOperation.produces || produces) {
+      operation.produces = oldOperation.produces || produces;
+  }
+
+  if (oldOperation.consumes || consumes) {
+      operation.consumes = oldOperation.consumes || consumes;
+  }
 
   if (Array.isArray(oldOperation.parameters) &&
       oldOperation.parameters.length) {
