@@ -25,6 +25,16 @@
 var urlParse = require('url').parse;
 var clone = require('lodash.clonedeep');
 
+var primitiveTypes = [
+  'string',
+  'number',
+  'boolean',
+  'integer',
+  'array',
+  'void',
+  'File'
+];
+
 if (typeof window === 'undefined') {
   module.exports = convert;
 } else {
@@ -95,10 +105,15 @@ function convert(resourceListing, apiDeclarations) {
 
   // Handle embedded documents
   if (Array.isArray(resourceListing.apis)) {
+    if (apiDeclarations.length > 0) {
+      result.tags = [];
+    }
     resourceListing.apis.forEach(function(api) {
-      tag = api.path.replace(/^\//,"");
-      result.tags.push({'name': tag, 'description': api.description || ''});
-
+      if (result.tags) {
+        result.tags.push({
+          'name': api.path.replace('.{format}', '').substring(1),
+          'description': api.description || ''});
+      }
       if (Array.isArray(api.operations)) {
         result.paths[api.path] = buildPath(api, resourceListing);
       }
@@ -186,7 +201,9 @@ function assignPathComponents(basePath, result) {
   var url = urlParse(basePath);
   result.host = url.host;
   result.basePath = url.path;
-  result.schemes = [url.protocol.substr(0, url.protocol.length - 1)];
+  if (url.protocol) {
+    result.schemes = [url.protocol.substr(0, url.protocol.length - 1)];
+  }
 }
 
 /*
@@ -199,7 +216,7 @@ function assignPathComponents(basePath, result) {
  *
  * @returns {object} - Swagger 2.0 equivalent
  */
-function processDataType(field) {
+function processDataType(field, fixRef) {
   field = clone(field);
 
   // Checking for the existence of '#/definitions/' is related to this bug:
@@ -211,33 +228,22 @@ function processDataType(field) {
     field.items.$ref = '#/definitions/' + field.items.$ref;
   }
 
-  if (field.type === 'integer') {
-    if (field.minimum) {
-      field.minimum = parseInt(field.minimum, 10);
-    }
-
-    if (field.maximum) {
-      field.maximum = parseInt(field.maximum, 10);
-    }
-  } else {
-    if (field.minimum) {
-      field.minimum = parseFloat(field.minimum);
-    }
-
-    if (field.maximum) {
-      field.maximum = parseFloat(field.maximum);
+  if (fixRef) {
+    if (field.type && primitiveTypes.indexOf(field.type) === -1) {
+      field = {$ref: '#/definitions/' + field.type};
     }
   }
 
-  if (field.defaultValue) {
-    if (field.type === 'integer') {
-      field.default = parseInt(field.defaultValue, 10);
-    } else if (field.type === 'number') {
-      field.default = parseFloat(field.defaultValue);
-    } else {
-      field.default = field.defaultValue;
-    }
+  if (field.minimum) {
+    field.minimum = fixValueType(field.minimum);
+  }
 
+  if (field.maximum) {
+    field.maximum = fixValueType(field.maximum);
+  }
+
+  if (field.defaultValue) {
+    field.default = fixValueType(field.defaultValue);
     delete field.defaultValue;
   }
 
@@ -260,7 +266,7 @@ function buildPath(api, apiDeclaration) {
   api.operations.forEach(function(oldOperation) {
     var method = oldOperation.method.toLowerCase();
     path[method] = buildOperation(oldOperation, apiDeclaration.produces,
-      apiDeclaration.consumes, tags);
+      apiDeclaration.consumes, tags, apiDeclaration.resourcePath);
   });
 
   return path;
@@ -274,13 +280,18 @@ function buildPath(api, apiDeclaration) {
  * @param tags {array} - contains resourcePath of the parent api
  * @returns {object} - Swagger 2.0 operation object
 */
-function buildOperation(oldOperation, produces, consumes, tags) {
+function buildOperation(oldOperation, produces, consumes, tags, resourcePath) {
   var operation = {
     responses: {},
     description: oldOperation.description || ''
   };
 
   operation.tags = tags;
+  // IGNORE TAGS, use it from upstream!
+  if (resourcePath) {
+    operation.tags = [];
+    operation.tags.push(resourcePath.substr(1));
+  }
 
   if (oldOperation.summary) {
     operation.summary = oldOperation.summary;
@@ -301,7 +312,7 @@ function buildOperation(oldOperation, produces, consumes, tags) {
   if (Array.isArray(oldOperation.parameters) &&
       oldOperation.parameters.length) {
     operation.parameters = oldOperation.parameters.map(function(parameter) {
-      return buildParameter(processDataType(parameter));
+      return buildParameter(parameter);
     });
   }
 
@@ -311,11 +322,10 @@ function buildOperation(oldOperation, produces, consumes, tags) {
     });
   }
 
-  if (!Object.keys(operation.responses).length) {
-    operation.responses = {
-      '200': {
-        description: 'No response was specified'
-      }
+  if (!Object.keys(operation.responses).length ||
+    (!operation.responses[200] && oldOperation.type)) {
+    operation.responses[200] = {
+      description: 'No response was specified'
     };
   }
 
@@ -336,6 +346,7 @@ function buildOperation(oldOperation, produces, consumes, tags) {
     'items'
   ];
 
+  /* COMMENTED OUT
   if(oldOperation.type != 'void'){
       if(!('200' in operation.responses)) {
           operation.responses['200'] = {
@@ -361,6 +372,16 @@ function buildOperation(oldOperation, produces, consumes, tags) {
                 oldOperation.items['$ref'];
         }
       }
+  }
+  */
+  if (oldOperation.type && oldOperation.type !== 'void') {
+    var schema = buildParamType(oldOperation);
+    if (primitiveTypes.indexOf(oldOperation.type) === -1) {
+      schema = {
+        '$ref': '#/definitions/' + oldOperation.type
+      };
+    }
+    operation.responses['200'].schema = schema;
   }
 
   return operation;
@@ -392,15 +413,30 @@ function buildParameter(oldParameter) {
     name: oldParameter.name,
     required: !!oldParameter.required
   };
-  var primitiveTypes = [
-    'string',
-    'number',
-    'boolean',
-    'integer',
-    'array',
-    'void',
-    'File'
-  ];
+
+  if (primitiveTypes.indexOf(oldParameter.type) === -1) {
+    parameter.schema = {$ref: '#/definitions/' + oldParameter.type};
+  } else if (oldParameter.paramType === 'body') {
+    parameter.schema = buildParamType(oldParameter);
+  } else {
+    extend(parameter, buildParamType(oldParameter));
+  }
+
+  // form was changed to formData in Swagger 2.0
+  if (parameter.in === 'form') {
+    parameter.in = 'formData';
+  }
+
+  return parameter;
+}
+
+/*
+ * Converts Swagger 1.2 type fields from parameter object into their Swagger 2.0 conterparts
+ * @param oldParameter {object} - Swagger 1.2 parameter object
+ * @returns {object} - Swagger 2.0 type fields from parameter object
+*/
+function buildParamType(oldParameter) {
+  var paramType = {};
   var copyProperties = [
     'format',
     'default',
@@ -409,6 +445,7 @@ function buildParameter(oldParameter) {
     'items'
   ];
 
+  /* COMMENTED OUT
   if (primitiveTypes.indexOf(oldParameter.type) === -1) {
     parameter.schema = {$ref: '#/definitions/' + oldParameter.type};
   } else {
@@ -429,15 +466,22 @@ function buildParameter(oldParameter) {
 
     if (typeof oldParameter.defaultValue !== 'undefined') {
       obj.default = oldParameter.defaultValue;
+  */
+  oldParameter = processDataType(oldParameter, false);
+
+  paramType.type = oldParameter.type.toLowerCase();
+
+  copyProperties.forEach(function(name) {
+    if (typeof oldParameter[name] !== 'undefined') {
+      paramType[name] = oldParameter[name];
     }
+  });
+
+  if (typeof oldParameter.defaultValue !== 'undefined') {
+    paramType.default = oldParameter.defaultValue;
   }
 
-  // form was changed to formData in Swagger 2.0
-  if (parameter.in === 'form') {
-    parameter.in = 'formData';
-  }
-
-  return parameter;
+  return paramType;
 }
 
 /*
@@ -533,7 +577,7 @@ function transformModel(model) {
   if (typeof model.properties === 'object') {
     Object.keys(model.properties).forEach(function(propertieName) {
       model.properties[propertieName] =
-        processDataType(model.properties[propertieName]);
+        processDataType(model.properties[propertieName], true);
     });
   }
 }
@@ -571,9 +615,13 @@ function transformAllModels(models) {
       var childModel = modelsClone[childId];
 
       if (childModel) {
-        childModel.allOf = (childModel.allOf || []).concat({
+        var allOf = (childModel.allOf || []).concat({
           $ref: '#/definitions/' + parent
-        });
+        }).concat(clone(childModel));
+        for (var member in childModel) {
+          delete childModel[member];
+        }
+        childModel.allOf = allOf;
       }
     });
   });
@@ -584,16 +632,33 @@ function transformAllModels(models) {
 /*
  * Extends an object with another
  * @param source {object} - object that will get extended
- * @parma distention {object} - object the will used to extend source
+ * @parma destination {object} - object the will used to extend source
 */
-function extend(source, distention) {
+function extend(source, destination) {
   if (typeof source !== 'object') {
     throw new Error('source must be objects');
   }
 
-  if (typeof distention === 'object') {
-    Object.keys(distention).forEach(function(key) {
-      source[key] = distention[key];
+  if (typeof destination === 'object') {
+    Object.keys(destination).forEach(function(key) {
+      source[key] = destination[key];
     });
+  }
+}
+
+/*
+ * Convert string values into the proper type.
+ * @param value {*} - value to convert
+ * @returns {*} - transformed modles object
+*/
+function fixValueType(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    throw Error('incorect property value: ' + e.message);
   }
 }
