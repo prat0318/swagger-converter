@@ -7,7 +7,6 @@
   "paths": {
     "/": {
       "post": {
-        "description": "",
         "summary": "POST to root",
         "parameters": [
           {
@@ -26,6 +25,24 @@
         "responses": {
           "200": {
             "description": "POST successful"
+          }
+        }
+      },
+      "get": {
+        "summary": "GET from root",
+        "parameters": [
+          {
+            "description": "The document ID",
+            "in": "query",
+            "name": "documentId",
+            "required": false,
+            "type": "string",
+            "default": "latest"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GET successful"
           }
         }
       }
